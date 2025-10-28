@@ -40,7 +40,7 @@ async def main():
     print("🔧 Initializing the Advanced Calculator + Calculus Agent...")
 
     # === (a) Brain: Language Model ===
-    llm = HuggingFaceAdapter("dolphin3-qwen25-3b")
+    # llm = HuggingFaceAdapter("dolphin3-qwen25-3b",auth_token = "")
     
     # === (b) Toolbelt: Register both calculator and calculus tools ===
     tool_registry = ToolRegistry()
@@ -118,3 +118,4 @@ async def main():
 # Entrypoint for script execution
 if __name__ == "__main__":
     asyncio.run(main())
+
