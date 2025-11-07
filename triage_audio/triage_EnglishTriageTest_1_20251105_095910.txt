@@ -1,1 +1,0 @@
-Triage category: Immediate. This patient requires immediate medical attention. Assessment confidence: 14 percent. Key findings: Patient cannot walk, Respiratory rate: 30 per minute. Recommended next question: Does the patient obey commands?
