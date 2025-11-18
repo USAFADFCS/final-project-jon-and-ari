@@ -50,6 +50,23 @@ asr = pipeline(
 print(f"✓ Model loaded on {DEVICE}")
 print(f"✓ Audio generation: {'Enabled' if ENABLE_AUDIO else 'Disabled'}")
 
+# A larger faster zero-shot classification model option
+# print("Loading zero-shot classification model...")
+# classifier = pipeline(
+#     "zero-shot-classification",
+#     model="facebook/bart-large-mnli",  # or use "MoritzLaurer/deberta-v3-base-zeroshot-v1.1-all-33" for lighter
+#     device=-1  # CPU
+# )
+# print(f"✓ Classification model loaded")
+
+print("Loading DistilBERT zero-shot classification model...")
+classifier = pipeline(
+    "zero-shot-classification",
+    model="typeform/distilbert-base-uncased-mnli",  # Lightweight! Only 250MB
+    device=-1  # CPU
+)
+print(f"✓ DistilBERT model loaded (optimized for Raspberry Pi)")
+
 # ============================================================
 # TRANSCRIPTION FUNCTIONS
 # ============================================================
@@ -96,7 +113,7 @@ def transcribe_with_vad(path):
 # ============================================================
 # ENTITY EXTRACTION
 # ============================================================
-def extract_triage_entities(transcription_text):
+# def extract_triage_entities(transcription_text): # Old function
     """Extract SALT-relevant medical information from transcription"""
     text_lower = transcription_text.lower()
     
@@ -201,8 +218,413 @@ def extract_triage_entities(transcription_text):
         evidence.append("Mental status: unresponsive")
     
     return entities, evidence
+# def extract_triage_entities(transcription_text):
+    """
+    Extract SALT-relevant medical information from transcription
+    NOW USES TRANSFORMER MODEL INSTEAD OF REGEX
+    """
+    text_lower = transcription_text.lower()
+    
+    entities = {
+        "can_walk": None,
+        "bleeding_severe": False,
+        "obeys_commands": None,
+        "resp_rate": None,
+        "radial_pulse": None,
+        "mental_status": None,
+        "cap_refill_sec": None
+    }
+    
+    evidence = []
+    
+    # ===== WALKING ABILITY (using AI model) =====
+    try:
+        walk_result = classifier(
+            transcription_text,
+            candidate_labels=["patient can walk", "patient cannot walk", "unclear"],
+            hypothesis_template="This assessment indicates that the {}"
+        )
+        
+        if walk_result['scores'][0] > 0.5:
+            top_label = walk_result['labels'][0]
+            if "can walk" in top_label and "cannot" not in top_label:
+                entities["can_walk"] = True
+                evidence.append(f"Walking: AI detected 'can walk' ({walk_result['scores'][0]:.2f} confidence)")
+            elif "cannot" in top_label:
+                entities["can_walk"] = False
+                evidence.append(f"Walking: AI detected 'cannot walk' ({walk_result['scores'][0]:.2f} confidence)")
+    except Exception as e:
+        print(f"  ⚠️ AI walking detection failed, using regex fallback")
+        # Fallback to your original regex
+        walk_yes = ["can walk", "walking", "ambulatory", "able to walk"]
+        walk_no = ["cannot walk", "can't walk", "unable to walk", "not walking"]
+        
+        for phrase in walk_yes:
+            if phrase in text_lower:
+                entities["can_walk"] = True
+                evidence.append(f"Walking: '{phrase}' detected (regex)")
+                break
+        
+        for phrase in walk_no:
+            if phrase in text_lower:
+                entities["can_walk"] = False
+                evidence.append(f"Not walking: '{phrase}' detected (regex)")
+                break
+    
+    # ===== BLEEDING (using AI model) =====
+    try:
+        bleed_result = classifier(
+            transcription_text,
+            candidate_labels=["severe hemorrhage or bleeding", "no severe bleeding", "unclear"],
+            hypothesis_template="This patient has {}"
+        )
+        
+        if bleed_result['scores'][0] > 0.5:
+            top_label = bleed_result['labels'][0]
+            if "severe" in top_label:
+                entities["bleeding_severe"] = True
+                evidence.append(f"Bleeding: AI detected severe bleeding ({bleed_result['scores'][0]:.2f} confidence)")
+    except:
+        print(f"  ⚠️ AI bleeding detection failed, using regex fallback")
+        # Fallback to your original regex
+        bleeding_phrases = ["severe bleeding", "hemorrhage", "massive hemorrhage", 
+                           "tourniquet applied", "massive bleeding", "heavy bleeding"]
+        for phrase in bleeding_phrases:
+            if phrase in text_lower:
+                entities["bleeding_severe"] = True
+                evidence.append(f"Severe bleeding: '{phrase}' detected (regex)")
+                break
+    
+    # ===== COMMAND RESPONSE (using AI model) =====
+    try:
+        cmd_result = classifier(
+            transcription_text,
+            candidate_labels=["patient obeys commands", "patient does not obey commands", "unclear"],
+            hypothesis_template="Assessment shows that {}"
+        )
+        
+        if cmd_result['scores'][0] > 0.5:
+            top_label = cmd_result['labels'][0]
+            if "obeys" in top_label and "not" not in top_label:
+                entities["obeys_commands"] = True
+                evidence.append(f"Commands: AI detected obeys commands ({cmd_result['scores'][0]:.2f} confidence)")
+            elif "does not" in top_label:
+                entities["obeys_commands"] = False
+                evidence.append(f"Commands: AI detected does not obey ({cmd_result['scores'][0]:.2f} confidence)")
+    except:
+        print(f"  ⚠️ AI command detection failed, using regex fallback")
+        # Fallback to your original regex
+        obey_yes = ["obeys commands", "follows commands", "responsive to commands", "responding"]
+        obey_no = ["does not obey", "doesn't obey", "unresponsive", "no response", 
+                   "not responding", "not obeying"]
+        
+        for phrase in obey_yes:
+            if phrase in text_lower:
+                entities["obeys_commands"] = True
+                evidence.append(f"Obeys commands: '{phrase}' detected (regex)")
+                break
+        
+        for phrase in obey_no:
+            if phrase in text_lower:
+                entities["obeys_commands"] = False
+                evidence.append(f"Does not obey: '{phrase}' detected (regex)")
+                break
+    
+    # ===== RESPIRATORY RATE (keep your regex - it works well for numbers) =====
+    resp_patterns = [
+        r'(\d+)\s*breaths?\s*(?:per\s*minute)?',
+        r'(\d+)\s*respirations?\s*(?:per\s*minute)?',
+        r'respiratory\s*rate\s*(?:of\s*)?(\d+)',
+        r'breathing\s*(?:at\s*)?(\d+)',
+        r'(\d+)\s*rpm'
+    ]
+    
+    for pattern in resp_patterns:
+        match = re.search(pattern, text_lower)
+        if match:
+            entities["resp_rate"] = int(match.group(1))
+            evidence.append(f"Respiratory rate: {match.group(1)} detected")
+            break
+    
+    # ===== RADIAL PULSE (using AI model) =====
+    try:
+        pulse_result = classifier(
+            transcription_text,
+            candidate_labels=["radial pulse present", "no radial pulse", "unclear"],
+            hypothesis_template="The assessment indicates that {}"
+        )
+        
+        if pulse_result['scores'][0] > 0.5:
+            top_label = pulse_result['labels'][0]
+            if "present" in top_label:
+                entities["radial_pulse"] = True
+                evidence.append(f"Pulse: AI detected pulse present ({pulse_result['scores'][0]:.2f} confidence)")
+            elif "no" in top_label:
+                entities["radial_pulse"] = False
+                evidence.append(f"Pulse: AI detected no pulse ({pulse_result['scores'][0]:.2f} confidence)")
+    except:
+        print(f"  ⚠️ AI pulse detection failed, using regex fallback")
+        # Fallback to your original regex
+        pulse_yes = ["radial pulse present", "has radial pulse", "pulse present"]
+        pulse_no = ["no radial pulse", "radial pulse absent", "no pulse"]
+        
+        for phrase in pulse_yes:
+            if phrase in text_lower:
+                entities["radial_pulse"] = True
+                evidence.append(f"Radial pulse: '{phrase}' detected (regex)")
+                break
+        
+        for phrase in pulse_no:
+            if phrase in text_lower:
+                entities["radial_pulse"] = False
+                evidence.append(f"No radial pulse: '{phrase}' detected (regex)")
+                break
+    
+    # ===== MENTAL STATUS (using AI model) =====
+    try:
+        mental_result = classifier(
+            transcription_text,
+            candidate_labels=["patient is alert", "patient responds to verbal", 
+                            "patient responds to pain", "patient is unresponsive"],
+            hypothesis_template="Assessment shows that {}"
+        )
+        
+        if mental_result['scores'][0] > 0.4:
+            top_label = mental_result['labels'][0]
+            if "alert" in top_label:
+                entities["mental_status"] = "alert"
+                evidence.append(f"Mental status: alert (AI: {mental_result['scores'][0]:.2f})")
+            elif "verbal" in top_label:
+                entities["mental_status"] = "verbal"
+                evidence.append(f"Mental status: verbal (AI: {mental_result['scores'][0]:.2f})")
+            elif "pain" in top_label:
+                entities["mental_status"] = "pain"
+                evidence.append(f"Mental status: pain (AI: {mental_result['scores'][0]:.2f})")
+            elif "unresponsive" in top_label:
+                entities["mental_status"] = "unresponsive"
+                evidence.append(f"Mental status: unresponsive (AI: {mental_result['scores'][0]:.2f})")
+    except:
+        print(f"  ⚠️ AI mental status detection failed, using regex fallback")
+        # Fallback to your original regex
+        if "alert" in text_lower:
+            entities["mental_status"] = "alert"
+            evidence.append("Mental status: alert (regex)")
+        elif "verbal" in text_lower or "responds to verbal" in text_lower:
+            entities["mental_status"] = "verbal"
+            evidence.append("Mental status: verbal (regex)")
+        elif "pain" in text_lower or "responds to pain" in text_lower:
+            entities["mental_status"] = "pain"
+            evidence.append("Mental status: pain (regex)")
+        elif "unresponsive" in text_lower:
+            entities["mental_status"] = "unresponsive"
+            evidence.append("Mental status: unresponsive (regex)")
+    
+    return entities, evidence
 
-
+def extract_triage_entities(transcription_text):
+    """
+    Extract SALT-relevant medical information from transcription
+    NOW USES DISTILBERT MODEL INSTEAD OF REGEX
+    """
+    text_lower = transcription_text.lower()
+    
+    entities = {
+        "can_walk": None,
+        "bleeding_severe": False,
+        "obeys_commands": None,
+        "resp_rate": None,
+        "radial_pulse": None,
+        "mental_status": None,
+        "cap_refill_sec": None
+    }
+    
+    evidence = []
+    
+    # ===== WALKING ABILITY (using DistilBERT) =====
+    try:
+        walk_result = classifier(
+            transcription_text,
+            candidate_labels=["patient can walk", "patient cannot walk", "unclear"],
+            hypothesis_template="This assessment indicates that the {}"
+        )
+        
+        if walk_result['scores'][0] > 0.5:
+            top_label = walk_result['labels'][0]
+            if "can walk" in top_label and "cannot" not in top_label:
+                entities["can_walk"] = True
+                evidence.append(f"Walking: DistilBERT detected 'can walk' ({walk_result['scores'][0]:.2f} confidence)")
+            elif "cannot" in top_label:
+                entities["can_walk"] = False
+                evidence.append(f"Walking: DistilBERT detected 'cannot walk' ({walk_result['scores'][0]:.2f} confidence)")
+                
+    except Exception as e:
+        print(f"  ⚠️ DistilBERT walking detection failed, using regex fallback")
+        # Fallback to your original regex
+        walk_yes = ["can walk", "walking", "ambulatory", "able to walk"]
+        walk_no = ["cannot walk", "can't walk", "unable to walk", "not walking"]
+        
+        for phrase in walk_yes:
+            if phrase in text_lower:
+                entities["can_walk"] = True
+                evidence.append(f"Walking: '{phrase}' detected (regex)")
+                break
+        
+        for phrase in walk_no:
+            if phrase in text_lower:
+                entities["can_walk"] = False
+                evidence.append(f"Not walking: '{phrase}' detected (regex)")
+                break
+    
+    # ===== BLEEDING (using DistilBERT) =====
+    try:
+        bleed_result = classifier(
+            transcription_text,
+            candidate_labels=["severe hemorrhage or bleeding", "no severe bleeding", "unclear"],
+            hypothesis_template="This patient has {}"
+        )
+        
+        if bleed_result['scores'][0] > 0.5:
+            top_label = bleed_result['labels'][0]
+            if "severe" in top_label:
+                entities["bleeding_severe"] = True
+                evidence.append(f"Bleeding: DistilBERT detected severe bleeding ({bleed_result['scores'][0]:.2f} confidence)")
+    except:
+        print(f"  ⚠️ DistilBERT bleeding detection failed, using regex fallback")
+        # Fallback to your original regex
+        bleeding_phrases = ["severe bleeding", "hemorrhage", "massive hemorrhage", 
+                           "tourniquet applied", "massive bleeding", "heavy bleeding"]
+        for phrase in bleeding_phrases:
+            if phrase in text_lower:
+                entities["bleeding_severe"] = True
+                evidence.append(f"Severe bleeding: '{phrase}' detected (regex)")
+                break
+    
+    # ===== COMMAND RESPONSE (using DistilBERT) =====
+    try:
+        cmd_result = classifier(
+            transcription_text,
+            candidate_labels=["patient obeys commands", "patient does not obey commands", "unclear"],
+            hypothesis_template="Assessment shows that {}"
+        )
+        
+        if cmd_result['scores'][0] > 0.5:
+            top_label = cmd_result['labels'][0]
+            if "obeys" in top_label and "not" not in top_label:
+                entities["obeys_commands"] = True
+                evidence.append(f"Commands: DistilBERT detected obeys commands ({cmd_result['scores'][0]:.2f} confidence)")
+            elif "does not" in top_label:
+                entities["obeys_commands"] = False
+                evidence.append(f"Commands: DistilBERT detected does not obey ({cmd_result['scores'][0]:.2f} confidence)")
+    except:
+        print(f"  ⚠️ DistilBERT command detection failed, using regex fallback")
+        # Fallback to your original regex
+        obey_yes = ["obeys commands", "follows commands", "responsive to commands", "responding"]
+        obey_no = ["does not obey", "doesn't obey", "unresponsive", "no response", 
+                   "not responding", "not obeying"]
+        
+        for phrase in obey_yes:
+            if phrase in text_lower:
+                entities["obeys_commands"] = True
+                evidence.append(f"Obeys commands: '{phrase}' detected (regex)")
+                break
+        
+        for phrase in obey_no:
+            if phrase in text_lower:
+                entities["obeys_commands"] = False
+                evidence.append(f"Does not obey: '{phrase}' detected (regex)")
+                break
+    
+    # ===== RESPIRATORY RATE (keep your regex - it works well for numbers) =====
+    resp_patterns = [
+        r'(\d+)\s*breaths?\s*(?:per\s*minute)?',
+        r'(\d+)\s*respirations?\s*(?:per\s*minute)?',
+        r'respiratory\s*rate\s*(?:of\s*)?(\d+)',
+        r'breathing\s*(?:at\s*)?(\d+)',
+        r'(\d+)\s*rpm'
+    ]
+    
+    for pattern in resp_patterns:
+        match = re.search(pattern, text_lower)
+        if match:
+            entities["resp_rate"] = int(match.group(1))
+            evidence.append(f"Respiratory rate: {match.group(1)} detected")
+            break
+    
+    # ===== RADIAL PULSE (using DistilBERT) =====
+    try:
+        pulse_result = classifier(
+            transcription_text,
+            candidate_labels=["radial pulse present", "no radial pulse", "unclear"],
+            hypothesis_template="The assessment indicates that {}"
+        )
+        
+        if pulse_result['scores'][0] > 0.5:
+            top_label = pulse_result['labels'][0]
+            if "present" in top_label:
+                entities["radial_pulse"] = True
+                evidence.append(f"Pulse: DistilBERT detected pulse present ({pulse_result['scores'][0]:.2f} confidence)")
+            elif "no" in top_label:
+                entities["radial_pulse"] = False
+                evidence.append(f"Pulse: DistilBERT detected no pulse ({pulse_result['scores'][0]:.2f} confidence)")
+    except:
+        print(f"  ⚠️ DistilBERT pulse detection failed, using regex fallback")
+        # Fallback to your original regex
+        pulse_yes = ["radial pulse present", "has radial pulse", "pulse present"]
+        pulse_no = ["no radial pulse", "radial pulse absent", "no pulse"]
+        
+        for phrase in pulse_yes:
+            if phrase in text_lower:
+                entities["radial_pulse"] = True
+                evidence.append(f"Radial pulse: '{phrase}' detected (regex)")
+                break
+        
+        for phrase in pulse_no:
+            if phrase in text_lower:
+                entities["radial_pulse"] = False
+                evidence.append(f"No radial pulse: '{phrase}' detected (regex)")
+                break
+    
+    # ===== MENTAL STATUS (using DistilBERT) =====
+    try:
+        mental_result = classifier(
+            transcription_text,
+            candidate_labels=["patient is alert", "patient responds to verbal", 
+                            "patient responds to pain", "patient is unresponsive"],
+            hypothesis_template="Assessment shows that {}"
+        )
+        
+        if mental_result['scores'][0] > 0.4:
+            top_label = mental_result['labels'][0]
+            if "alert" in top_label:
+                entities["mental_status"] = "alert"
+                evidence.append(f"Mental status: alert (DistilBERT: {mental_result['scores'][0]:.2f})")
+            elif "verbal" in top_label:
+                entities["mental_status"] = "verbal"
+                evidence.append(f"Mental status: verbal (DistilBERT: {mental_result['scores'][0]:.2f})")
+            elif "pain" in top_label:
+                entities["mental_status"] = "pain"
+                evidence.append(f"Mental status: pain (DistilBERT: {mental_result['scores'][0]:.2f})")
+            elif "unresponsive" in top_label:
+                entities["mental_status"] = "unresponsive"
+                evidence.append(f"Mental status: unresponsive (DistilBERT: {mental_result['scores'][0]:.2f})")
+    except:
+        print(f"  ⚠️ DistilBERT mental status detection failed, using regex fallback")
+        # Fallback to your original regex
+        if "alert" in text_lower:
+            entities["mental_status"] = "alert"
+            evidence.append("Mental status: alert (regex)")
+        elif "verbal" in text_lower or "responds to verbal" in text_lower:
+            entities["mental_status"] = "verbal"
+            evidence.append("Mental status: verbal (regex)")
+        elif "pain" in text_lower or "responds to pain" in text_lower:
+            entities["mental_status"] = "pain"
+            evidence.append("Mental status: pain (regex)")
+        elif "unresponsive" in text_lower:
+            entities["mental_status"] = "unresponsive"
+            evidence.append("Mental status: unresponsive (regex)")
+    
+    return entities, evidence
+    
 # ============================================================
 # SALT TRIAGE RULES
 # ============================================================
