@@ -1,0 +1,144 @@
+{
+  "patient_id": "COMBAT_001",
+  "timestamp": "2025-11-18T10:28:38.166641",
+  "entities": {
+    "responds_to_voice": true,
+    "can_walk": true,
+    "bleeding_severe": false,
+    "obeys_commands": false,
+    "resp_rate": null,
+    "radial_pulse": null,
+    "mental_status": null,
+    "cap_refill_sec": null,
+    "visible_injury": null
+  },
+  "evidence": [
+    "Patient verbally responsive: 'Yeah, I can hear you....'",
+    "Strong ability pattern: \\b(yes|yeah|yep|yup)\\b.*\\b(walk|walking|stand|standing)\\b",
+    "Non-compliance detected: \\b(no|can\\'t|cannot|what|huh|confused|don\\'t understand)\\b",
+    "AI classified as non-severe (0.96)",
+    "Could not extract respiratory rate"
+  ],
+  "interaction_history": [
+    {
+      "timestamp": "2025-11-18T10:27:40.657830",
+      "step": 0,
+      "question": "Can you hear me? If you can hear me, say yes or make a sound.",
+      "response": "Yeah, I can hear you.",
+      "analysis": {
+        "value": true,
+        "confidence": 0.8666510581970215,
+        "method": "zero_shot_classification",
+        "evidence": "Patient verbally responsive: 'Yeah, I can hear you....'",
+        "needs_clarification": false
+      }
+    },
+    {
+      "timestamp": "2025-11-18T10:27:53.702183",
+      "step": 1,
+      "question": "Can you walk? If you can walk, please stand up and take a step.",
+      "response": "Uh, yeah, I can walk.",
+      "analysis": {
+        "value": true,
+        "confidence": 0.9,
+        "method": "regex_strong_positive",
+        "evidence": "Strong ability pattern: \\b(yes|yeah|yep|yup)\\b.*\\b(walk|walking|stand|standing)\\b",
+        "needs_clarification": false
+      }
+    },
+    {
+      "timestamp": "2025-11-18T10:28:01.680294",
+      "step": 2,
+      "question": "Can you squeeze my hand? Squeeze if you understand me.",
+      "response": "Nah, can't squeeze your hand.",
+      "analysis": {
+        "value": false,
+        "confidence": 0.8,
+        "method": "regex_non_compliance",
+        "evidence": "Non-compliance detected: \\b(no|can\\'t|cannot|what|huh|confused|don\\'t understand)\\b",
+        "needs_clarification": false
+      }
+    },
+    {
+      "timestamp": "2025-11-18T10:28:14.994737",
+      "step": 3,
+      "question": "Where are you hurt? Tell me if you have any bleeding or pain.",
+      "response": "I'm bleeding in my right arm.",
+      "analysis": {
+        "value": false,
+        "confidence": 0.9562066793441772,
+        "method": "zero_shot_bleeding_severity",
+        "evidence": "AI classified as non-severe (0.96)",
+        "needs_clarification": false
+      }
+    },
+    {
+      "timestamp": "2025-11-18T10:28:38.165248",
+      "step": 4,
+      "question": "I'm going to count your breaths. Just breathe normally for 15 seconds.",
+      "response": "So, I'm going to try this one.",
+      "analysis": {
+        "value": null,
+        "confidence": 0.0,
+        "method": "failed",
+        "evidence": "Could not extract respiratory rate",
+        "needs_clarification": true
+      }
+    }
+  ],
+  "triage_result": {
+    "category": "MINIMAL",
+    "criticality_score": 20,
+    "confidence": 0.7,
+    "probabilities": {},
+    "feature_importance": {},
+    "transmission_package": {
+      "transmission_time": "2025-11-18T10:28:38.165700",
+      "patient_id": "COMBAT_001",
+      "location": {
+        "latitude": 34.0522,
+        "longitude": -118.2437,
+        "altitude": null,
+        "accuracy": null
+      },
+      "triage": {
+        "category": "MINIMAL",
+        "criticality_score": 20,
+        "confidence": 0.7,
+        "assessment_method": "AI_ENHANCED_SALT"
+      },
+      "vitals": {
+        "respiratory_rate": null,
+        "heart_rate": 110,
+        "spo2": 92,
+        "blood_pressure": 95,
+        "temperature": 36.2
+      },
+      "assessment": {
+        "responsive": true,
+        "ambulatory": true,
+        "severe_bleeding": false,
+        "follows_commands": false
+      },
+      "interventions_needed": [],
+      "transport_priority": 5,
+      "metadata": {
+        "ai_model_version": "2.0",
+        "feature_importance": {},
+        "data_completeness": 66.66666666666666
+      }
+    },
+    "method": "rule_based_SALT"
+  },
+  "sensor_data": {
+    "patient_id": "COMBAT_001",
+    "gps_lat": 34.0522,
+    "gps_lon": -118.2437,
+    "heart_rate": 110,
+    "spo2": 92,
+    "systolic_bp": 95,
+    "skin_temp": 36.2,
+    "age": 28,
+    "mechanism_of_injury": 2
+  }
+}
