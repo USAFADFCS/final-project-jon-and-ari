@@ -19,12 +19,13 @@ from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 import warnings
 warnings.filterwarnings('ignore')
+import re
 
 # Audio processing
 import sounddevice as sd
 from scipy.io.wavfile import write
 
-# ML Models
+# ML Models 
 from transformers import pipeline
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
@@ -170,11 +171,55 @@ class MARCHProtocolAssessment:
             }
         ]
     
+    # def analyze_march_response(self, 
+    #                            category: str,
+    #                            question_id: str,
+    #                            patient_response: str,
+    #                            target: str) -> Dict:
+    #     """
+    #     Analyze patient response for specific MARCH component.
+        
+    #     Returns:
+    #         {
+    #             'value': extracted value,
+    #             'severity': 0-4 (0=normal, 4=critical),
+    #             'confidence': 0.0-1.0,
+    #             'evidence': explanation
+    #         }
+    #     """
+    #     text_lower = patient_response.lower()
+        
+    #     # Route to appropriate analyzer
+    #     if category == "MASSIVE_HEMORRHAGE":
+    #         return self._analyze_hemorrhage(patient_response, text_lower)
+        
+    #     elif category == "AIRWAY":
+    #         return self._analyze_airway(patient_response, text_lower)
+        
+    #     elif category == "RESPIRATION":
+    #         if target == "resp_rate":
+    #             return self._analyze_resp_rate(patient_response, text_lower)
+    #         else:
+    #             return self._analyze_breathing(patient_response, text_lower)
+        
+    #     elif category == "CIRCULATION":
+    #         return self._analyze_circulation(patient_response, text_lower)
+        
+    #     elif category == "HYPOTHERMIA":
+    #         return self._analyze_hypothermia(patient_response, text_lower)
+        
+    #     return {
+    #         'value': None,
+    #         'severity': 0,
+    #         'confidence': 0.0,
+    #         'evidence': 'Unknown category'
+    #     }
+    
     def analyze_march_response(self, 
-                               category: str,
-                               question_id: str,
-                               patient_response: str,
-                               target: str) -> Dict:
+                        category: str,
+                        question_id: str,
+                        patient_response: str,
+                        target: str) -> Dict:
         """
         Analyze patient response for specific MARCH component.
         
@@ -212,117 +257,116 @@ class MARCHProtocolAssessment:
             'severity': 0,
             'confidence': 0.0,
             'evidence': 'Unknown category'
-        }
-    
+    }
+
     def _analyze_hemorrhage(self, response: str, text_lower: str) -> Dict:
         """
         Analyze for massive hemorrhage (M in MARCH).
         Severity: 0=none, 1=minor, 2=moderate, 3=severe, 4=life-threatening
+        
+        Strategy:
+        1. Check if bleeding is controlled/resolved (early exit)
+        2. Check for very specific severe patterns (high confidence regex)
+        3. Use AI classification for everything else (nuanced assessment)
         """
-        # Life-threatening patterns
-        critical_patterns = [
-            r'\b(spurting|gushing|pouring|can\'t stop|arterial)\b',
-            r'\b(lot of blood|lots of blood|bleeding out|massive)\b',
-            r'\b(tourniquet|pressure won\'t stop)\b'
+        
+        # Step 1: Check for controlled/resolved bleeding
+        controlled_patterns = [
+            r'\b(stopped|controlled|under control)\b',
+            r'\b(tourniquet).*\b(stopped|working|applied)\b',
+            r'\b(pressure).*\b(stopped|working|helping)\b',
+            r'\b(bleeding).*\b(stopped|slowed|better)\b',
+            r'\b(no longer|not anymore).*\b(bleeding)\b'
         ]
         
-        # Severe patterns
-        severe_patterns = [
-            r'\b(bleeding|blood).*\b(bad|severe|heavy|much)\b',
-            r'\b(soaked|drenched)\b.*\b(blood)\b'
+        has_bleeding_mention = re.search(r'\b(bleeding|blood|hemorrhage)\b', text_lower)
+        is_controlled = False
+        
+        if has_bleeding_mention:
+            for pattern in controlled_patterns:
+                if re.search(pattern, text_lower):
+                    is_controlled = True
+                    break
+        
+        if is_controlled:
+            return {
+                'value': True,
+                'severity': 1,  # Minor - intervention successful
+                'confidence': 0.90,
+                'evidence': 'Bleeding mentioned but successfully controlled with intervention'
+            }
+        
+        # Step 2: Check for VERY SPECIFIC severe patterns only
+        # These are unambiguous indicators of life-threatening hemorrhage
+        life_threatening_patterns = [
+            r'\b(spurting|gushing|pouring)\b.*\b(blood)\b',
+            r'\b(blood).*\b(spurting|gushing|pouring)\b',
+            r'\b(can\'t stop|won\'t stop).*\b(bleeding)\b',
+            r'\b(bleeding).*\b(can\'t stop|won\'t stop)\b',
+            r'\b(arterial).*\b(bleeding)\b',
+            r'\b(bleeding out)\b',
+            r'\b(massive hemorrhage)\b',
+            r'\b(exsanguinating)\b'
         ]
         
-        # Moderate patterns
-        moderate_patterns = [
-            r'\b(bleeding|blood)\b',
-            r'\b(cut|wound).*\b(bleeding)\b'
-        ]
-        
-        # Minor patterns
-        minor_patterns = [
-            r'\b(small|minor|little|scratch).*\b(bleeding|blood)\b'
-        ]
-        
-        import re
-        
-        # Check critical first
-        for pattern in critical_patterns:
+        for pattern in life_threatening_patterns:
             if re.search(pattern, text_lower):
                 return {
                     'value': True,
                     'severity': 4,
                     'confidence': 0.95,
-                    'evidence': 'Life-threatening hemorrhage detected'
+                    'evidence': 'Life-threatening hemorrhage detected - unambiguous pattern'
                 }
         
-        # Check severe
-        for pattern in severe_patterns:
-            if re.search(pattern, text_lower):
-                return {
-                    'value': True,
-                    'severity': 3,
-                    'confidence': 0.90,
-                    'evidence': 'Severe bleeding detected'
-                }
-        
-        # Check moderate
-        for pattern in moderate_patterns:
-            if re.search(pattern, text_lower):
-                # Use AI to determine severity
-                try:
-                    result = self.classifier(
-                        response,
-                        candidate_labels=[
-                            "life-threatening massive bleeding",
-                            "severe bleeding requiring immediate attention",
-                            "moderate bleeding that needs treatment",
-                            "minor bleeding or small wound"
-                        ]
-                    )
-                    
-                    if "life-threatening" in result['labels'][0]:
-                        severity = 4
-                    elif "severe" in result['labels'][0]:
-                        severity = 3
-                    elif "moderate" in result['labels'][0]:
-                        severity = 2
-                    else:
-                        severity = 1
-                    
-                    return {
-                        'value': True,
-                        'severity': severity,
-                        'confidence': result['scores'][0],
-                        'evidence': f'AI classified bleeding: {result["labels"][0]}'
-                    }
-                except:
-                    pass
+        # Step 3: If bleeding mentioned but not severe regex, use AI for nuanced classification
+        if has_bleeding_mention:
+            try:
+                result = self.classifier(
+                    response,
+                    candidate_labels=[
+                        "life-threatening massive uncontrolled bleeding",
+                        "severe heavy bleeding requiring immediate attention",
+                        "moderate bleeding that needs treatment soon",
+                        "minor bleeding or small wound"
+                    ]
+                )
+                
+                # Map AI classification to severity
+                top_label = result['labels'][0]
+                confidence = result['scores'][0]
+                
+                if "life-threatening" in top_label:
+                    severity = 4
+                elif "severe" in top_label:
+                    severity = 3
+                elif "moderate" in top_label:
+                    severity = 2
+                else:
+                    severity = 1
                 
                 return {
                     'value': True,
-                    'severity': 2,
-                    'confidence': 0.70,
-                    'evidence': 'Bleeding detected, severity uncertain'
+                    'severity': severity,
+                    'confidence': confidence,
+                    'evidence': f'AI classified: {top_label}'
                 }
-        
-        # Check minor
-        for pattern in minor_patterns:
-            if re.search(pattern, text_lower):
+            except Exception as e:
+                # Fallback if AI fails
                 return {
                     'value': True,
-                    'severity': 1,
-                    'confidence': 0.85,
-                    'evidence': 'Minor bleeding detected'
+                    'severity': 2,
+                    'confidence': 0.60,
+                    'evidence': 'Bleeding detected, AI classification failed - defaulting to moderate'
                 }
         
-        # No bleeding
+        # No bleeding mentioned
         return {
             'value': False,
             'severity': 0,
-            'confidence': 0.80,
+            'confidence': 0.85,
             'evidence': 'No bleeding indicators found'
         }
-    
+
     def _analyze_airway(self, response: str, text_lower: str) -> Dict:
         """
         Analyze airway patency (A in MARCH).
@@ -344,13 +388,11 @@ class MARCHProtocolAssessment:
                 'confidence': 0.90,
                 'evidence': 'Unable to speak - potential airway obstruction'
             }
-    
+
     def _analyze_breathing(self, response: str, text_lower: str) -> Dict:
         """
         Analyze breathing adequacy (R in MARCH).
         """
-        import re
-        
         # Respiratory distress patterns
         distress_patterns = [
             r'\b(can\'t breathe|can\'t breath|gasping|choking)\b',
@@ -420,15 +462,13 @@ class MARCHProtocolAssessment:
             'confidence': 0.50,
             'evidence': 'Unable to assess breathing adequacy'
         }
-    
+
     def _analyze_resp_rate(self, response: str, text_lower: str) -> Dict:
         """
         Extract respiratory rate (R in MARCH).
         Normal: 12-20 breaths/min
         Concerning: <10 or >30
-        """
-        import re
-        
+        """        
         patterns = [
             r'(\d+)\s*breaths?',
             r'(\d+)\s*per\s*minute',
@@ -464,7 +504,7 @@ class MARCHProtocolAssessment:
             'confidence': 0.0,
             'evidence': 'Could not extract respiratory rate'
         }
-    
+
     def _analyze_circulation(self, response: str, text_lower: str) -> Dict:
         """
         Analyze circulation adequacy (C in MARCH).
@@ -486,12 +526,11 @@ class MARCHProtocolAssessment:
                 'confidence': 0.90,
                 'evidence': 'Patient unresponsive - circulation compromised'
             }
-    
+
     def _analyze_hypothermia(self, response: str, text_lower: str) -> Dict:
         """
         Analyze hypothermia risk (H in MARCH).
         """
-        import re
         
         # Cold/hypothermia patterns
         cold_patterns = [
