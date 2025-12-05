@@ -1,12 +1,12 @@
 {
   "patient_id": "COMBAT_001",
-  "timestamp": "2025-11-24T13:20:59.148884",
+  "timestamp": "2025-12-04T21:58:24.307681",
   "march_results": {
     "MASSIVE_HEMORRHAGE": {
-      "value": false,
-      "severity": 0,
-      "confidence": 0.85,
-      "evidence": "No bleeding indicators found"
+      "value": true,
+      "severity": 1,
+      "confidence": 0.9,
+      "evidence": "Bleeding mentioned but successfully controlled with intervention"
     },
     "AIRWAY": {
       "value": true,
@@ -15,38 +15,38 @@
       "evidence": "Patient speaking clearly - airway patent"
     },
     "RESPIRATION": {
-      "value": null,
-      "severity": 2,
-      "confidence": 0.0,
-      "evidence": "Could not extract respiratory rate"
-    },
-    "CIRCULATION": {
       "value": true,
       "severity": 0,
       "confidence": 0.85,
-      "evidence": "Patient responsive - circulation adequate"
+      "evidence": "Breathing appears adequate"
+    },
+    "CIRCULATION": {
+      "value": false,
+      "severity": 2,
+      "confidence": 0.8,
+      "evidence": "Patient reports mild dizziness/weakness but says they are managing"
     },
     "HYPOTHERMIA": {
-      "value": null,
-      "severity": 1,
-      "confidence": 0.5,
-      "evidence": "Hypothermia status unclear"
+      "value": true,
+      "severity": 3,
+      "confidence": 0.8,
+      "evidence": "Patient is wet and feeling cold"
     }
   },
   "triage_result": {
-    "category": "MINIMAL",
-    "criticality_score": 15.0,
-    "confidence": 0.90018638707401,
-    "march_summary": "M:NORMAL A:NORMAL R:MODERATE C:NORMAL H:MINOR",
+    "category": "IMMEDIATE",
+    "criticality_score": 45.0,
+    "confidence": 0.7498919433075306,
+    "march_summary": "M:MINOR A:NORMAL R:NORMAL C:MODERATE H:SEVERE",
     "gps_coordinates": {
       "latitude": 34.0522,
       "longitude": -118.2437
     },
     "first_responder_package": {
-      "timestamp": "2025-11-24T13:20:59.140867",
-      "triage_category": "MINIMAL",
-      "criticality_score": 15.0,
-      "march_summary": "M:NORMAL A:NORMAL R:MODERATE C:NORMAL H:MINOR",
+      "timestamp": "2025-12-04T21:58:24.305490",
+      "triage_category": "IMMEDIATE",
+      "criticality_score": 45.0,
+      "march_summary": "M:MINOR A:NORMAL R:NORMAL C:MODERATE H:SEVERE",
       "location": {
         "latitude": 34.0522,
         "longitude": -118.2437,
@@ -55,10 +55,13 @@
       "vitals": {
         "heart_rate": 115,
         "respiratory_rate": 24,
-        "body_temperature": 36.1
+        "body_temperature": 34.5
       },
-      "recommended_actions": [],
-      "transport_priority": 3
+      "recommended_actions": [
+        "PREVENT_HEAT_LOSS",
+        "WARM_FLUIDS"
+      ],
+      "transport_priority": 1
     }
   },
   "sensor_data": {
@@ -68,6 +71,6 @@
     "gps_accuracy": 5,
     "heart_rate": 115,
     "resp_rate": 24,
-    "body_temp": 36.1
+    "body_temp": 34.5
   }
 }
